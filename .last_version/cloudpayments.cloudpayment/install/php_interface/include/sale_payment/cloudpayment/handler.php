@@ -1,950 +1,961 @@
 <?php
 
-namespace Sale\Handlers\PaySystem;
+  namespace Sale\Handlers\PaySystem;
 
-use Bitrix\Main\Error;
-use Bitrix\Main\Localization\Loc;
-use Bitrix\Main\Request;
-use Bitrix\Main\Text\Encoding;
-use Bitrix\Main\Type\DateTime;
-use Bitrix\Main\Web\HttpClient;
-use Bitrix\Sale\BusinessValue;
-use Bitrix\Sale\PaySystem;
-use Bitrix\Sale\Payment;
+  use Bitrix\Catalog\CCatalogProduct;
+  use Bitrix\Main\Error;
+  use Bitrix\Main\Localization\Loc;
+  use Bitrix\Main\Request;
+  use Bitrix\Main\Text\Encoding;
+  use Bitrix\Main\Type\DateTime;
+  use Bitrix\Main\Web\HttpClient;
+  use Bitrix\Sale\BusinessValue;
+  use Bitrix\Sale\Payment;
+  use Bitrix\Sale\PaySystem;
 
-use Bitrix\Catalog\CCatalogProduct;
+  Loc::loadMessages(__FILE__);
 
-Loc::loadMessages(__FILE__);
+  /**
+   * Class YandexHandler
+   * @package Sale\Handlers\PaySystem
+   */
+  class CloudpaymentHandler extends PaySystem\ServiceHandler implements PaySystem\IHold, PaySystem\IRefund
+  {
+    /**
+     * @param Payment $payment
+     * @param Request|null $request
+     * @return PaySystem\ServiceResult
+     */
 
-/**
- * Class YandexHandler
- * @package Sale\Handlers\PaySystem
- */
-class CloudpaymentHandler extends PaySystem\ServiceHandler implements  PaySystem\IHold, PaySystem\IRefund
-{
-	/**
-	 * @param Payment $payment
-	 * @param Request|null $request
-	 * @return PaySystem\ServiceResult
-	 */
-
-  
-	public function initiatePay(Payment $payment, Request $request = null)
-	{
-		$params = array(
-			'URL' => $this->getUrl($payment, 'pay'),
-			'PS_MODE' => $this->service->getField('PS_MODE'),
-			'BX_PAYSYSTEM_CODE' => $this->service->getField('ID')
-		);
-
-		$this->setExtraParams($params);
-
-		return $this->showTemplate($payment, "template");
-	}
-
-	/**
-	 * @return array
-	 */
-	public static function getIndicativeFields()
-	{
-		return array('BX_HANDLER' => 'CLOUDPAYMENT');
-	}
-
-	/**
-	 * @param Request $request
-	 * @param $paySystemId
-	 * @return bool
-	 */
-
-    static  public function isMyResponse(Request $request, $paySystemId)
+    public function initiatePay(Payment $payment, Request $request = NULL)
     {
-        return true;
+      $params = array(
+        'URL' => $this->getUrl($payment, 'pay'),
+        'PS_MODE' => $this->service->getField('PS_MODE'),
+        'BX_PAYSYSTEM_CODE' => $this->service->getField('ID')
+      );
+
+      $this->setExtraParams($params);
+
+      return $this->showTemplate($payment, "template");
     }
+
+    /**
+     * @return array
+     */
+    public static function getIndicativeFields()
+    {
+      return array('BX_HANDLER' => 'CLOUDPAYMENT');
+    }
+
+    /**
+     * @param Request $request
+     * @param $paySystemId
+     * @return bool
+     */
+
+    static public function isMyResponse(Request $request, $paySystemId)
+    {
+      return true;
+    }
+
     public function confirm(Payment $payment)
     {
-        $result = new PaySystem\ServiceResult();
-        $httpClient = new HttpClient();
+      $result = new PaySystem\ServiceResult();
+      $httpClient = new HttpClient();
 
-        $url = $this->getUrl($payment, 'confirm');
-        $requestDT = date('c');
-        
-        $request = array(
-            'orderId' => $this->getBusinessValue($payment, 'PAYMENT_ID'),
-            'amount' => $this->getBusinessValue($payment, 'PAYMENT_SHOULD_PAY'),
-            'currency' => $this->getBusinessValue($payment, 'PAYMENT_CURRENCY'),
-            'requestDT' => $requestDT
-        );
-        $responseString = $httpClient->post($url, $request);
+      $url = $this->getUrl($payment, 'confirm');
+      $requestDT = date('c');
 
-        if ($responseString !== false)
-        {
-            $element = $this->parseXmlResponse('confirmPaymentResponse', $responseString);
-            $status = (int)$element->getAttribute('status');
-            if ($status == 0)
-                $result->setOperationType(PaySystem\ServiceResult::MONEY_COMING);
-            else
-                $result->addError(new Error('Error on try to confirm payment. Status: '.$status));
-        }
+      $request = array(
+        'orderId' => $this->getBusinessValue($payment, 'PAYMENT_ID'),
+        'amount' => $this->getBusinessValue($payment, 'PAYMENT_SHOULD_PAY'),
+        'currency' => $this->getBusinessValue($payment, 'PAYMENT_CURRENCY'),
+        'requestDT' => $requestDT
+      );
+      $responseString = $httpClient->post($url, $request);
+
+      if ($responseString !== false) {
+        $element = $this->parseXmlResponse('confirmPaymentResponse', $responseString);
+        $status = (int)$element->getAttribute('status');
+        if ($status == 0)
+          $result->setOperationType(PaySystem\ServiceResult::MONEY_COMING);
         else
-        {
-            $result->addError(new Error("Error sending request. URL=".$url." PARAMS=".join(' ', $request)));
-        }
+          $result->addError(new Error('Error on try to confirm payment. Status: ' . $status));
+      } else {
+        $result->addError(new Error("Error sending request. URL=" . $url . " PARAMS=" . join(' ', $request)));
+      }
 
-        if (!$result->isSuccess())
-        {
-            PaySystem\ErrorLog::add(array(
-                'ACTION' => 'confirmPayment',
-                'MESSAGE' => join('\n', $result->getErrorMessages())
-            ));
-        }
+      if (!$result->isSuccess()) {
+        PaySystem\ErrorLog::add(array(
+          'ACTION' => 'confirmPayment',
+          'MESSAGE' => join('\n', $result->getErrorMessages())
+        ));
+      }
 
-        return $result;
+      return $result;
     }
 
+    static protected function isMyResponseExtended(Request $request, $paySystemId)
+    {
+      $id = $request->get('BX_PAYSYSTEM_CODE');
+      return $id == $paySystemId;
+    }
 
-	static protected function isMyResponseExtended(Request $request, $paySystemId)
-	{
-	    $id = $request->get('BX_PAYSYSTEM_CODE');
-		return $id == $paySystemId;
-	}
+    /**
+     * @param Payment $payment
+     * @param int $refundableSum
+     * @return PaySystem\ServiceResult
+     */
+    public function refund(Payment $payment, $refundableSum)
+    {
+      $result = new PaySystem\ServiceResult();
+      $error = '';
 
-	/**
-	 * @param Payment $payment
-	 * @param int $refundableSum
-	 * @return PaySystem\ServiceResult
-	 */
-	public function refund(Payment $payment, $refundableSum)
-	{
-    		$result = new PaySystem\ServiceResult();
-    		$error = '';
+      $request = array(
+        'TransactionId' => $payment->getField('PAY_VOUCHER_NUM'),
+        'Amount' => number_format($refundableSum, 2, '.', ''),
+        //  'JsonData'=>'',
+      );
 
-        $request=array(
-            'TransactionId'=>$payment->getField('PAY_VOUCHER_NUM'),
-            'Amount'=>number_format($refundableSum, 2, '.', ''),
-          //  'JsonData'=>'',
-        );
+      $url = $this->getUrl($payment, 'return');
 
+      self::Error("CONFIRM___request2");
+      self::Error(print_r($request,1));
 
+      $accesskey = trim($this->getBusinessValue($payment, 'APIPASS'));
+      $access_psw = trim($this->getBusinessValue($payment, 'APIKEY'));
+      $ch = curl_init($url);
+      curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+      curl_setopt($ch, CURLOPT_USERPWD, $accesskey . ":" . $access_psw);
+      curl_setopt($ch, CURLOPT_URL, $url);
+      curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+      curl_setopt($ch, CURLOPT_POST, true);
+      curl_setopt($ch, CURLOPT_POSTFIELDS, $request);
+      $content = curl_exec($ch);
+      $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+      $curlError = curl_error($ch);
+      curl_close($ch);
+      $out = $this->Object_to_array(json_decode($content));
+      if ($out['Success'] !== false) {
+        $result->setOperationType(PaySystem\ServiceResult::MONEY_LEAVING);
 
-        $url = $this->getUrl($payment, 'return');
+      } else {
+        $error .= $out['Message'];
+      }
 
-        $accesskey=trim($this->getBusinessValue($payment, 'APIPASS'));
-        $access_psw=trim($this->getBusinessValue($payment, 'APIKEY'));
-      	$ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-        curl_setopt($ch,CURLOPT_USERPWD,$accesskey . ":" . $access_psw);
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER,true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $request);
-    	  $content = curl_exec($ch);
-	      $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    		$curlError = curl_error($ch);
-    		curl_close($ch);
-        $out=$this->Object_to_array(json_decode($content));
-        if ($out['Success'] !== false)
-        {
-              $result->setOperationType(PaySystem\ServiceResult::MONEY_LEAVING);
+      if ($error !== '') {
+        $result->addError(new Error($error));
+        PaySystem\ErrorLog::add(array(
+          'ACTION' => 'returnPaymentRequest',
+          'MESSAGE' => join("\n", $result->getErrorMessages())
+        ));
+      }
 
-
-        }
-        else
-        {
-            $error .= $out['Message'];
-        }
-        
-    		if ($error !== '')
-    		{
-    			$result->addError(new Error($error));
-    			PaySystem\ErrorLog::add(array(
-    				'ACTION' => 'returnPaymentRequest',
-    				'MESSAGE' => join("\n", $result->getErrorMessages())
-    			));
-    		}
-
-		return $result;
-	}
+      return $result;
+    }
 
     function Object_to_array($data)
     {
-        if (is_array($data) || is_object($data))
-        {
-            $result = array();
-            foreach ($data as $key => $value)
-            {
-                $result[$key] = self::Object_to_array($value);
-            }
-            return $result;
+      if (is_array($data) || is_object($data)) {
+        $result = array();
+        foreach ($data as $key => $value) {
+          $result[$key] = self::Object_to_array($value);
         }
-        return $data;
-    }
-    private function CheckHMac($APIPASS){
-
-        $headers = $this->detallheaders();
-        if (!((!isset($headers['Content-HMAC'])) and (!isset($headers['Content-Hmac'])))) {
-            $message = file_get_contents('php://input');
-            $s = hash_hmac('sha256', $message, $APIPASS, true);
-            $hmac = base64_encode($s);
-            return (!array_key_exists('Content-HMAC',$headers) && !array_key_exists('Content-Hmac',$headers) || (array_key_exists('Content-HMAC',$headers) && $headers['Content-HMAC'] != $hmac) || (array_key_exists('Content-Hmac',$headers) && $headers['Content-Hmac'] != $hmac));
-
-        }
-
-
-    }
-    private function detallheaders(){
-        if (!is_array($_SERVER)) {
-            return array();
-        }
-        $headers = array();
-        foreach ($_SERVER as $name => $value) {
-            if (substr($name, 0, 5) == 'HTTP_') {
-                $headers[str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($name, 5)))))] = $value;
-            }
-        }
-        return $headers;
+        return $result;
+      }
+      return $data;
     }
 
-	/**
-	 * @param Payment $payment
-	 * @param Request $request
-	 * @return bool
+    private function CheckHMac($APIPASS)
+    {
+
+      $headers = $this->detallheaders();
+      if (!((!isset($headers['Content-HMAC'])) and (!isset($headers['Content-Hmac'])))) {
+        $message = file_get_contents('php://input');
+        $s = hash_hmac('sha256', $message, $APIPASS, true);
+        $hmac = base64_encode($s);
+        return (!array_key_exists('Content-HMAC', $headers) && !array_key_exists('Content-Hmac', $headers) || (array_key_exists('Content-HMAC', $headers) && $headers['Content-HMAC'] != $hmac) || (array_key_exists('Content-Hmac', $headers) && $headers['Content-Hmac'] != $hmac));
+
+      }
+
+    }
+
+    private function detallheaders()
+    {
+      if (!is_array($_SERVER)) {
+        return array();
+      }
+      $headers = array();
+      foreach ($_SERVER as $name => $value) {
+        if (substr($name, 0, 5) == 'HTTP_') {
+          $headers[str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($name, 5)))))] = $value;
+        }
+      }
+      return $headers;
+    }
+
+    /**
+     * @param Payment $payment
+     * @param Request $request
+     * @return bool
      */
-    
-  private function isCorrectOrderID(Payment $payment, Request $request)
-  {
+
+    private function isCorrectOrderID(Payment $payment, Request $request)
+    {
       $sum = $request->get('InvoiceId');
       $paymentSum = $this->getBusinessValue($payment, 'PAYMENT_ID');
 
       return roundEx($paymentSum, 2) == roundEx($sum, 2);
-  }
-  public function Error($str)
-  {
-        $file = $_SERVER['DOCUMENT_ROOT'].'/log_cloud1.txt';
-        $current = file_get_contents($file);
-        $current .= $str."\n";
-        file_put_contents($file, $current);
-  }
-  
-  public function isFullPricePaid($order,$paymentCollection, $request)
-  {      
-        $sum=0;
+    }
+
+    public function Error($str)
+    {
+      $file = $_SERVER['DOCUMENT_ROOT'] . '/bitrix/php_interface/include/sale_payment/cloudpayment/log_NEW2019.txt';
+      $current = file_get_contents($file);
+      $current .= $str . "\n";
+      file_put_contents($file, $current);
+    }
+
+    public function isFullPricePaid($order, $paymentCollection, $request)
+    {
+      $sum = 0;
       /*  foreach ($paymentCollection as $payment):
             $sum += $payment->getSum()
-        endforeach;  */  
-        self::Error(roundEx($paymentCollection->getPaidSum(),2).'=='.roundEx($order->getPrice(),2));
+        endforeach;  */
+      self::Error(roundEx($paymentCollection->getPaidSum(), 2) . '==' . roundEx($order->getPrice(), 2));
 
-        if (roundEx($paymentCollection->getPaidSum(),2)==roundEx($order->getPrice(),2)) return true;
-        else return false;
-  }
+      if (roundEx($paymentCollection->getPaidSum(), 2) == roundEx($order->getPrice(), 2))
+        return true;
+      else return false;
+    }
 
-	private function isCorrectSum(Payment $payment, Request $request)
-	{
-		$sum = $request->get('orderSumAmount');
-		$paymentSum = $this->getBusinessValue($payment, 'PAYMENT_SHOULD_PAY');
+    private function isCorrectSum(Payment $payment, Request $request)
+    {
+      $sum = $request->get('Amount');
+      $paymentSum = $this->getBusinessValue($payment, 'PAYMENT_SHOULD_PAY');
 
-		return roundEx($paymentSum, 2) == roundEx($sum, 2);
-	}
+      return roundEx($paymentSum, 2) == roundEx($sum, 2);
+    }
 
-	/**
-	 * @param PaySystem\ServiceResult $result
-	 * @param Request $request
-	 * @return mixed
-	 */
-	public function sendResponse(PaySystem\ServiceResult $result, Request $request)
-	{
-		global $APPLICATION;
-		$APPLICATION->RestartBuffer();
-		$data = $result->getData();
-		$res['code']=$data['CODE'];
-        echo json_encode($res);
-		die();
-	}
+    /**
+     * @param PaySystem\ServiceResult $result
+     * @param Request $request
+     * @return mixed
+     */
+    public function sendResponse(PaySystem\ServiceResult $result, Request $request)
+    {
+      global $APPLICATION;
+      $APPLICATION->RestartBuffer();
+      $data = $result->getData();
+      $res['code'] = $data['CODE'];
+      echo json_encode($res);
+      die();
+    }
 
-	/**
-	 * @param Request $request
-	 * @return mixed
-	 */
-	public function getPaymentIdFromRequest(Request $request)
-	{
-      if ($request->get('InvoiceId'))
-      {
-	    $order=\Bitrix\Sale\Order::load($request->get('InvoiceId'));
-	    foreach($order->getPaymentCollection() as $payment){
-			$l[]=$payment->getField("ID");
-		}
-//		$l=$order->getPaymentSystemId();
-	    return current($l);
+    /**
+     * @param Request $request
+     * @return mixed
+     */
+    public function getPaymentIdFromRequest(Request $request)
+    {
+      if ($request->get('InvoiceId')) {
+        $order = \Bitrix\Sale\Order::load($request->get('InvoiceId'));
+        foreach ($order->getPaymentCollection() as $payment) {
+          $l[] = $payment->getField("ID");
+        }
+        //		$l=$order->getPaymentSystemId();
+        return current($l);
       }
-	}
+    }
 
-	/**
-	 * @param Payment $payment
-	 * @param Request $request
-	 * @return PaySystem\ServiceResult
-	 */
-	private function processCheckAction(Payment $payment, Request $request)
-	{
-    		$result = new PaySystem\ServiceResult();
-    		$data = $this->extractDataFromRequest($request);  
-        $accesskey=trim($this->getBusinessValue($payment, 'APIPSW'));
-        if($this->CheckHMac($accesskey))
-        {
-            if ($this->isCorrectSum($payment, $request))
-            {
-                $data['CODE'] = 0;
-            }
-            else
-            {
-                $data['CODE'] = 11;
-                $errorMessage = 'Incorrect payment sum';
+    /**
+     * @param Payment $payment
+     * @param Request $request
+     * @return PaySystem\ServiceResult
+     */
+    private function processCheckAction(Payment $payment, Request $request)
+    {
+      self::addError2("----");
+      $result = new PaySystem\ServiceResult();
+      $data = $this->extractDataFromRequest($request);
+      $accesskey = trim($this->getBusinessValue($payment, 'APIPSW'));
+      if ($this->CheckHMac($accesskey)) {
 
-                $result->addError(new Error($errorMessage));
-                PaySystem\ErrorLog::add(array(
-                    'ACTION' => 'checkOrderResponse',
-                    'MESSAGE' => $errorMessage
-                ));
-            }
-            
-            ////13
-            
-            $order=\Bitrix\Sale\Order::load($data['INVOICE_ID']);
-            $STATUS_AU = $this->getBusinessValue($payment, 'STATUS_AU');
-            $STATUS_CHANCEL= $this->getBusinessValue($payment, 'STATUS_CHANCEL');
-            
-            if($this->isCorrectOrderID($payment, $request))
-            {
-                $data['CODE'] = 0;
-            }else
-            {
-                $data['CODE'] = 10;
-                $errorMessage = 'Incorrect order ID';
+        $order = \Bitrix\Sale\Order::load($data['INVOICE_ID']);
 
-                $result->addError(new Error($errorMessage));
-                PaySystem\ErrorLog::add(array(
-                    'ACTION' => 'checkOrderResponse',
-                    'MESSAGE' => $errorMessage
-                ));
-            }
-            
-            
-            $orderID=$request->get('InvoiceId');
-            $order=\Bitrix\Sale\Order::load($orderID);
-            
-            $paymentCollection = $order->getPaymentCollection();
-            if($paymentCollection->isPaid())  ////1111
-            {
-                $data['CODE'] = 13;
-                $errorMessage = 'Order already paid';
+        if ($this->getBusinessValue($payment, 'NEW_STATUS') == "Y"):
+          $STATUS_AU = $this->getBusinessValue($payment, 'STATUS_AU2');
+          $STATUS_CHANCEL = $this->getBusinessValue($payment, 'STATUS_CHANCEL2');
+        else:
+          $STATUS_AU = $this->getBusinessValue($payment, 'STATUS_AU');
+          $STATUS_CHANCEL = $this->getBusinessValue($payment, 'STATUS_CHANCEL');
+        endif;
 
-                $result->addError(new Error($errorMessage));
-                PaySystem\ErrorLog::add(array(
-                    'ACTION' => 'checkOrderResponse',
-                    'MESSAGE' => $errorMessage
-                ));
-            }else{
-                $data['CODE'] = 0;
-            }
+        if ($this->isCorrectOrderID($payment, $request)) {
+          $data['CODE'] = 0;
+        } else {
+          $data['CODE'] = 10;
+          self::addError2("Incorrect order ID");
+          $errorMessage = 'Incorrect order ID';
 
-                                                                                               ///1111
-            if ($order->getField("STATUS_ID")==$STATUS_AU || $paymentCollection->isPaid() || $order->isCanceled() || $order->getField("STATUS_ID")==$STATUS_CHANCEL)
-            {
-               $data['CODE'] = 13;
-            }
-            
-            $result->setData($data);
-        }else{
-            $errorMessage='ERROR HMAC RECORDS';
-            $result->addError(new Error($errorMessage));
-            PaySystem\ErrorLog::add(array(
-                'ACTION' => 'checkOrderResponse',
-                'MESSAGE' => $errorMessage
-            ));
+          $result->addError(new Error($errorMessage));
+          PaySystem\ErrorLog::add(array(
+            'ACTION' => 'checkOrderResponse',
+            'MESSAGE' => $errorMessage
+          ));
+          $result->setData($data);
+          return $result;
         }
 
-		return $result;
-	}
+        $orderID = $request->get('InvoiceId');
+        $order = \Bitrix\Sale\Order::load($orderID);
+
+        if ($order->getCurrency() != $this->getBusinessValue($payment, 'PAYMENT_CURRENCY')):
+          $data['CODE'] = 13;
+          self::addError2("Incorrect payment currency");
+          self::addError2($order->getCurrency() . '!=' . $this->getBusinessValue($payment, 'PAYMENT_CURRENCY'));
+          $result->setData($data);
+          return $result;
+        endif;
+
+        $paymentCollection = $order->getPaymentCollection();
+
+        $check_sum = false;
+
+        foreach ($paymentCollection as $payment):
+          if (roundEx($payment->getSum(), 2) == roundEx($request->get('Amount'), 2)):
+            $check_sum = true;
+            $data['CODE'] = 0;
+          endif;
+        endforeach;
+
+        if (!$check_sum):
+          $data['CODE'] = 11;
+          self::addError2("Incorrect payment sum");
+          self::addError2(roundEx($request->get('Amount'), 2) . "===" . roundEx($this->getBusinessValue($payment, 'PAYMENT_SHOULD_PAY'), 2));
+          $result->setData($data);
+          return $result;
+        endif;
+
+        if ($paymentCollection->isPaid())  ////1111
+        {
+          $data['CODE'] = 13;
+          $errorMessage = 'Order already paid';
+
+          $result->addError(new Error($errorMessage));
+          PaySystem\ErrorLog::add(array(
+            'ACTION' => 'checkOrderResponse',
+            'MESSAGE' => $errorMessage
+          ));
+          $result->setData($data);
+          return $result;
+        } else {
+          $data['CODE'] = 0;
+        }
+
+        ///1111
+        if ($order->getField("STATUS_ID") == $STATUS_AU || $paymentCollection->isPaid() || $order->isCanceled() || $order->getField("STATUS_ID") == $STATUS_CHANCEL) {
+          $data['CODE'] = 13;
+        }
+
+        $result->setData($data);
+      } else {
+        $errorMessage = 'ERROR HMAC RECORDS';
+        $result->addError(new Error($errorMessage));
+        PaySystem\ErrorLog::add(array(
+          'ACTION' => 'checkOrderResponse',
+          'MESSAGE' => $errorMessage
+        ));
+      }
+
+      return $result;
+    }
 
     private function processFailAction(Payment $payment, Request $request)
     {
-        $result = new PaySystem\ServiceResult();
-        $data = $this->extractDataFromRequest($request);
-        $data['CODE'] = 0;
-        $result->setData($data);
-        return $result;
+      $result = new PaySystem\ServiceResult();
+      $data = $this->extractDataFromRequest($request);
+      $data['CODE'] = 0;
+      $result->setData($data);
+      return $result;
 
     }
-    
+
     function addError2($txt)
     {
-          $file = $_SERVER['DOCUMENT_ROOT'].'/bitrix/php_interface/include/sale_payment/cloudpayment/log2.txt';
-          $current = file_get_contents($file);
-          $current .= $txt."\n";
-          file_put_contents($file, $current);
+      $file = $_SERVER['DOCUMENT_ROOT'] . '/bitrix/php_interface/include/sale_payment/cloudpayment/log.txt';
+      $current = file_get_contents($file);
+      $current .= $txt . "\n";
+      file_put_contents($file, $current);
     }
-    
-    
-  function cur_json_encode($a=false)      /////OK
-  {
+
+    function cur_json_encode($a = false)      /////OK
+    {
       if (is_null($a) || is_resource($a)) {
-          return 'null';
+        return 'null';
       }
       if ($a === false) {
-          return 'false';
+        return 'false';
       }
       if ($a === true) {
-          return 'true';
+        return 'true';
       }
-      
+
       if (is_scalar($a)) {
-          if (is_float($a)) {
-              //Always use "." for floats.
-              $a = str_replace(',', '.', strval($a));
-          }
-  
-          // All scalars are converted to strings to avoid indeterminism.
-          // PHP's "1" and 1 are equal for all PHP operators, but
-          // JS's "1" and 1 are not. So if we pass "1" or 1 from the PHP backend,
-          // we should get the same result in the JS frontend (string).
-          // Character replacements for JSON.
-          static $jsonReplaces = array(
-              array("\\", "/", "\n", "\t", "\r", "\b", "\f", '"'),
-              array('\\\\', '\\/', '\\n', '\\t', '\\r', '\\b', '\\f', '\"')
-          );
-  
-          return '"' . str_replace($jsonReplaces[0], $jsonReplaces[1], $a) . '"';
+        if (is_float($a)) {
+          //Always use "." for floats.
+          $a = str_replace(',', '.', strval($a));
+        }
+
+        // All scalars are converted to strings to avoid indeterminism.
+        // PHP's "1" and 1 are equal for all PHP operators, but
+        // JS's "1" and 1 are not. So if we pass "1" or 1 from the PHP backend,
+        // we should get the same result in the JS frontend (string).
+        // Character replacements for JSON.
+        static $jsonReplaces = array(
+          array("\\", "/", "\n", "\t", "\r", "\b", "\f", '"'),
+          array('\\\\', '\\/', '\\n', '\\t', '\\r', '\\b', '\\f', '\"')
+        );
+
+        return '"' . str_replace($jsonReplaces[0], $jsonReplaces[1], $a) . '"';
       }
-  
+
       $isList = true;
-  
+
       for ($i = 0, reset($a); $i < count($a); $i++, next($a)) {
-          if (key($a) !== $i) {
-              $isList = false;
-              break;
-          }
+        if (key($a) !== $i) {
+          $isList = false;
+          break;
+        }
       }
-  
+
       $result = array();
-      
+
       if ($isList) {
-          foreach ($a as $v) {
-              $result[] = self::cur_json_encode($v);
-          }
-      
-          return '[ ' . join(', ', $result) . ' ]';
+        foreach ($a as $v) {
+          $result[] = self::cur_json_encode($v);
+        }
+
+        return '[ ' . join(', ', $result) . ' ]';
       } else {
-          foreach ($a as $k => $v) {
-              $result[] = self::cur_json_encode($k) . ': ' . self::cur_json_encode($v);
-          }
-  
-          return '{ ' . join(', ', $result) . ' }';
+        foreach ($a as $k => $v) {
+          $result[] = self::cur_json_encode($k) . ': ' . self::cur_json_encode($v);
+        }
+
+        return '{ ' . join(', ', $result) . ' }';
       }
-  }
-  
-  
-function GetOldBasket($order_id,$DATE_PAID)
-{    
+    }
+
+    function GetOldBasket($order_id, $DATE_PAID)
+    {
       if ($order_id && $DATE_PAID):
-            global $DB;
-                            //return "SELECT * FROM `b_sale_order_change` WHERE `DATE_MODIFY`>'".$DATE_PAID."' and `ORDER_ID`=".$order_id;   
-            
-            $results_sql = $DB->Query("SELECT * FROM `b_sale_order_change` WHERE `DATE_MODIFY`<='".$DATE_PAID."' and `ORDER_ID`=".$order_id." and `TYPE`='SHIPMENT_ITEM_BASKET_ADDED'");
-            while ($row_sql = $results_sql->Fetch()):
-               $tmp=unserialize($row_sql['DATA']);
-               $FROM_ITEMS[$tmp['PRODUCT_ID']]['QUANTITY']=$tmp['QUANTITY'];
-               $FROM_ITEMS[$tmp['PRODUCT_ID']]['NAME']=$tmp['NAME'];
-            endwhile;
-            
-            $results_sql = $DB->Query("SELECT * FROM `b_sale_order_change` WHERE `DATE_MODIFY`<='".$DATE_PAID."' and `ORDER_ID`=".$order_id." and (`TYPE`='BASKET_QUANTITY_CHANGED' OR `TYPE`='BASKET_ADDED')");
-            while ($row_sql = $results_sql->Fetch()):
-               $tmp=unserialize($row_sql['DATA']);
-               if ($FROM_ITEMS[$tmp['PRODUCT_ID']])
-                $FROM_ITEMS[$tmp['PRODUCT_ID']]['QUANTITY']=$tmp['QUANTITY'];
-                $FROM_ITEMS[$tmp['PRODUCT_ID']]['NAME']=$tmp['NAME'];
-            endwhile;
-            
-            return $FROM_ITEMS;
+        global $DB;
+        //return "SELECT * FROM `b_sale_order_change` WHERE `DATE_MODIFY`>'".$DATE_PAID."' and `ORDER_ID`=".$order_id;
+
+        $results_sql = $DB->Query("SELECT * FROM `b_sale_order_change` WHERE `DATE_MODIFY`<='" . $DATE_PAID . "' and `ORDER_ID`=" . $order_id . " and `TYPE`='SHIPMENT_ITEM_BASKET_ADDED'");
+        while ($row_sql = $results_sql->Fetch()):
+          $tmp = unserialize($row_sql['DATA']);
+          $FROM_ITEMS[$tmp['PRODUCT_ID']]['QUANTITY'] = $tmp['QUANTITY'];
+          $FROM_ITEMS[$tmp['PRODUCT_ID']]['NAME'] = $tmp['NAME'];
+        endwhile;
+
+        $results_sql = $DB->Query("SELECT * FROM `b_sale_order_change` WHERE `DATE_MODIFY`<='" . $DATE_PAID . "' and `ORDER_ID`=" . $order_id . " and (`TYPE`='BASKET_QUANTITY_CHANGED' OR `TYPE`='BASKET_ADDED')");
+        while ($row_sql = $results_sql->Fetch()):
+          $tmp = unserialize($row_sql['DATA']);
+          if ($FROM_ITEMS[$tmp['PRODUCT_ID']])
+            $FROM_ITEMS[$tmp['PRODUCT_ID']]['QUANTITY'] = $tmp['QUANTITY'];
+          $FROM_ITEMS[$tmp['PRODUCT_ID']]['NAME'] = $tmp['NAME'];
+        endwhile;
+
+        return $FROM_ITEMS;
       else:
-            return false;      
+        return false;
       endif;
-}
-  
-    
-    function send_kkt($type,$order,$payment_1)
-    {                                          
-        \Bitrix\Main\Loader::includeModule("sale");
-        \Bitrix\Main\Loader::includeModule("catalog");   
-
-
-        $propertyCollection = $order->getPropertyCollection();
-        $items=array();
-        $basket = \Bitrix\Sale\Basket::loadItemsForOrder($order);
-        $basketItems = $basket->getBasketItems();
-        $data=array();
-        $items=array();
-
-
-        $PAID_IDS=array();
-        $DATE_PAID='';
-        $paymentCollection = $order->getPaymentCollection();
-        foreach ($paymentCollection as $payment):
-            if ($payment->isPaid()):
-                $PAID_IDS[]=$payment->getField("ID");
-            endif;
-        endforeach;
-        
-        if ($PAID_IDS[0]):
-              global $DB;
-              $results_sql = $DB->Query("SELECT `ID`,`DATE_PAID` FROM `b_sale_order_payment` WHERE `ID`=".implode(" or `ID`=",$PAID_IDS)." and `PAID`='Y' ORDER BY `ID` desc");
-        
-              if ($row_sql = $results_sql->Fetch()):
-                     if (!empty($DATE_PAID)):
-                           if (strtotime($row_sql['DATE_PAID'])>strtotime($DATE_PAID)):
-                                $DATE_PAID=$row_sql['DATE_PAID'];
-                           endif;
-                     else:
-                          $DATE_PAID=$row_sql['DATE_PAID'];      
-                     endif;
-              endif;
-        endif;
-
-        self::Error('DATE_PAID');
-        self::Error(print_r($DATE_PAID,1));
-
-        $OLD_BASKET=self::GetOldBasket($order->getId(),$DATE_PAID);
-
-
-        foreach ($OLD_BASKET as $basketId=>$basketItem1):
-            $basketQuantity=$basketItem1['QUANTITY'];
-
-            $basket = \Bitrix\Sale\Basket::create(SITE_ID);        
-        self::Error('create');            
-            $item = $basket->createItem('catalog', $basketId);
-            $item->setFields(array(
-                'QUANTITY' => $basketQuantity,
-                'PRODUCT_PROVIDER_CLASS' => '\CCatalogProductProvider',
-            ));
-
-            $basketItem=\Bitrix\Catalog\PriceTable::getList(array('filter'=>array('ID'=>$basketId)))->fetch();
-            if($basketItem):
-                  $prD=\Bitrix\Catalog\ProductTable::getList(array('filter'=>array('ID'=>$basketId)))->fetch();
-                  if($prD):
-                      if($prD['VAT_ID']==0):
-                          $nds=null;
-                      else:
-                          $nds=floatval($item->getField('VAT_RATE')==0 ? 0 : $item->getField('VAT_RATE')*100);
-                      endif;
-                  else:
-                      $nds=null;
-                  endif;
-                  
-                 $ORDER_PRICE0=$order->getPrice(); 
-                 $PRODUCT_PRICE=$item->getField('PRICE'); 
-      
-                  $items[]=array(
-                          'label'=>$basketItem1['NAME'],
-                          'price'=>number_format($PRODUCT_PRICE,2,".",''),
-                          'quantity'=>$basketQuantity,
-                          'amount'=>number_format(floatval($PRODUCT_PRICE*$basketQuantity),2,".",''),
-                          'vat'=>$nds,
-                          'ean13'=>null);
-            endif;
-        endforeach;
-
-
-        self::Error('items');
-        self::Error(print_r($items,1));
-
-        //Добавляем доставку
-        $KKT_PARAMS['VAT_DELIVERY'.$order->getField("DELIVERY_ID")]=$this->getBusinessValue($payment_1, 'VAT_DELIVERY'.$order->getField("DELIVERY_ID"));
-        if ($order->getDeliveryPrice() > 0 && $order->getField("DELIVERY_ID")) 
-        {
-            if ($KKT_PARAMS['VAT_DELIVERY'.$order->getField("DELIVERY_ID")]) $Delivery_vat=$KKT_PARAMS['VAT_DELIVERY'.$order->getField("DELIVERY_ID")];
-            else $Delivery_vat=null;
-            
-
-            $PRODUCT_PRICE_DELIVERY=$order->getDeliveryPrice(); 
-
-                 
-            $items[] = array(
-                'label' => 'Доставка',
-                'price' => number_format($order->getDeliveryPrice(), 2, ".", ''),
-                'quantity' => 1,
-                'amount' => number_format($PRODUCT_PRICE_DELIVERY, 2, ".", ''),
-                'vat' => $Delivery_vat,  
-                'ean13' => null
-            );
-            unset($PRODUCT_PRICE_DELIVERY);
-            unset($PRODUCT_PRICE);
-       }
-              
-              $KKT_PARAMS['INN']=$this->getBusinessValue($payment_1, 'INN');
-              $KKT_PARAMS['NALOG']=$this->getBusinessValue($payment_1, 'TYPE_NALOG');
-              $KKT_PARAMS['APIPASS']=$this->getBusinessValue($payment_1, 'APIPASS');
-              $KKT_PARAMS['APIKEY']=$this->getBusinessValue($payment_1, 'APIKEY');
-               
-                
-              $data_kkt=array(
-                "Type"=>$type,
-                "InvoiceId"=>$order->getId(),
-                "AccountId"=>$order->getUserId(),
-                "Inn"=>$KKT_PARAMS['INN'],
-                "CustomerReceipt"=>array(
-                   "Items"=>$items,
-                   "taxationSystem"=>$KKT_PARAMS['NALOG'],
-                    "email"=>$propertyCollection->getUserEmail()->getValue(),
-                    "phone"=>$propertyCollection->getPhone()->getValue(),
-                )
-              );
-            
-              $this->Error('send kkt');
-              $this->Error(print_r($data_kkt,1));
-              $request2=self::cur_json_encode($data_kkt);
-              $str=date("d-m-Y H:i:s").$data_kkt['Type'].$data_kkt['InvoiceId'].$data_kkt['AccountId'].$data_kkt['CustomerReceipt']['email'];
-              $reque=md5($str);
-              $ch = curl_init('https://api.cloudpayments.ru/kkt/receipt');
-              curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
-              curl_setopt($ch,CURLOPT_USERPWD,trim($KKT_PARAMS['APIPASS']).":".trim($KKT_PARAMS['APIKEY']));
-              curl_setopt($ch, CURLOPT_RETURNTRANSFER,true);
-              curl_setopt($ch, CURLOPT_HTTPHEADER, array("Content-Type: application/json","X-Request-ID:".$reque));
-              curl_setopt($ch, CURLOPT_POST, true);
-              curl_setopt($ch, CURLOPT_POSTFIELDS, $request2);
-              $content = curl_exec($ch);
-              $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-              $curlError = curl_error($ch);
-              curl_close($ch);
-
-
-              $out1=$this->Object_to_array(json_decode($content));
-
- 
     }
-    
-    
+
+    function send_kkt($type, $order, $payment_1)
+    {
+      \Bitrix\Main\Loader::includeModule("sale");
+      \Bitrix\Main\Loader::includeModule("catalog");
+
+      $propertyCollection = $order->getPropertyCollection();
+      $items = array();
+      $basket = \Bitrix\Sale\Basket::loadItemsForOrder($order);
+      $basketItems = $basket->getBasketItems();
+      $data = array();
+      $items = array();
+
+      $PAID_IDS = '';
+      $DATE_PAID = '';
+      $paymentCollection = $order->getPaymentCollection();
+      foreach ($paymentCollection as $payment):
+        if ($payment->isPaid()):
+          $PAID_IDS[] = $payment->getField("ID");
+        endif;
+      endforeach;
+
+      if ($PAID_IDS[0]):
+        global $DB;
+        $results_sql = $DB->Query("SELECT `ID`,`DATE_PAID` FROM `b_sale_order_payment` WHERE `ID`=" . implode(" or `ID`=", $PAID_IDS) . " and `PAID`='Y' ORDER BY `ID` desc");
+
+        if ($row_sql = $results_sql->Fetch()):
+          if (!empty($DATE_PAID)):
+            if (strtotime($row_sql['DATE_PAID']) > strtotime($DATE_PAID)):
+              $DATE_PAID = $row_sql['DATE_PAID'];
+            endif;
+          else:
+            $DATE_PAID = $row_sql['DATE_PAID'];
+          endif;
+        endif;
+      endif;
+
+      $OLD_BASKET = self::GetOldBasket($order->getId(), $DATE_PAID);
+      $sum2 = 0;
+      foreach ($OLD_BASKET as $basketId => $basketItem1):
+        $basketQuantity = $basketItem1['QUANTITY'];
+
+        $basket = \Bitrix\Sale\Basket::create();
+        $item = $basket->createItem('catalog', $basketId);
+        $item->setFields(array(
+          'QUANTITY' => $basketQuantity,
+          'PRODUCT_PROVIDER_CLASS' => '\CCatalogProductProvider',
+        ));
+
+        $basketItem = \Bitrix\Catalog\PriceTable::getList(array('filter' => array('ID' => $basketId)))->fetch();
+        if ($basketItem):
+          $prD = \Bitrix\Catalog\ProductTable::getList(array('filter' => array('ID' => $basketId)))->fetch();
+          if ($prD):
+            if ($prD['VAT_ID'] == 0):
+              $nds = NULL;
+            else:
+              $nds = floatval($item->getField('VAT_RATE') == 0 ? 0 : $item->getField('VAT_RATE') * 100);
+            endif;
+          else:
+            $nds = NULL;
+          endif;
+
+          $ORDER_PRICE0 = $order->getPrice();
+          $PRODUCT_PRICE = number_format($basketItem->getField('PRICE'), 2, ".", '');
+
+          if ($this->getBusinessValue($payment_1, 'PAYMENT_CURRENCY') && $this->getBusinessValue($payment_1, 'PAYMENT_CURRENCY') != "RUB"):
+            $PRODUCT_PRICE = get_course($PRODUCT_PRICE, $this->getBusinessValue($payment_1, 'PAYMENT_CURRENCY'), $this->getBusinessValue($payment_1, 'COURSE_RATE'));
+          endif;
+          $sum2 = $sum2 + ($PRODUCT_PRICE * $basketQuantity);
+          $items[] = array(
+            'label' => $basketItem1['NAME'],
+            'price' => number_format($PRODUCT_PRICE, 2, ".", ''),
+            'quantity' => $basketQuantity,
+            'amount' => number_format($PRODUCT_PRICE * $basketQuantity, 2, ".", ''),
+            'vat' => $nds
+          );
+        endif;
+      endforeach;
+
+      //Добавляем доставку
+      $KKT_PARAMS['VAT_DELIVERY' . $order->getField("DELIVERY_ID")] = $this->getBusinessValue($payment_1, 'VAT_DELIVERY' . $order->getField("DELIVERY_ID"));
+      if ($order->getDeliveryPrice() > 0 && $order->getField("DELIVERY_ID")) {
+        if ($KKT_PARAMS['VAT_DELIVERY' . $order->getField("DELIVERY_ID")])
+          $Delivery_vat = $KKT_PARAMS['VAT_DELIVERY' . $order->getField("DELIVERY_ID")];
+        else $Delivery_vat = NULL;
+
+        $PRODUCT_PRICE_DELIVERY = number_format($order->getDeliveryPrice(), 2, ".", '');
+        if ($this->getBusinessValue($payment_1, 'PAYMENT_CURRENCY') && $this->getBusinessValue($payment_1, 'PAYMENT_CURRENCY') != "RUB"):
+          $PRODUCT_PRICE_DELIVERY = get_course($PRODUCT_PRICE_DELIVERY, $this->getBusinessValue($payment_1, 'PAYMENT_CURRENCY'), $this->getBusinessValue($payment_1, 'COURSE_RATE'));
+        endif;
+        $sum2 = $sum2 + $PRODUCT_PRICE_DELIVERY;
+        $items[] = array(
+          'label' => 'Доставка',
+          'price' => number_format($PRODUCT_PRICE_DELIVERY, 2, ".", ''),
+          'quantity' => 1,
+          'amount' => number_format($PRODUCT_PRICE_DELIVERY, 2, ".", ''),
+          'vat' => $Delivery_vat,
+          'ean13' => NULL
+        );
+        unset($PRODUCT_PRICE_DELIVERY);
+        unset($PRODUCT_PRICE);
+      }
+
+      $KKT_PARAMS['INN'] = $this->getBusinessValue($payment_1, 'INN');
+      $KKT_PARAMS['NALOG'] = $this->getBusinessValue($payment_1, 'TYPE_NALOG');
+      $KKT_PARAMS['APIPASS'] = $this->getBusinessValue($payment_1, 'APIPASS');
+      $KKT_PARAMS['APIKEY'] = $this->getBusinessValue($payment_1, 'APIKEY');
+
+      $data_kkt = array(
+        "Type" => $type,
+        "InvoiceId" => $order->getId(),
+        "AccountId" => $order->getUserId(),
+        "Inn" => $KKT_PARAMS['INN'],
+        "CustomerReceipt" => array(
+          "Items" => $items,
+          "taxationSystem" => $KKT_PARAMS['NALOG'],
+          "email" => $propertyCollection->getUserEmail()->getValue(),
+          "phone" => $propertyCollection->getPhone()->getValue(),
+          "electronic" => $sum2,
+          "advancePayment" => 0,
+          "credit" => 0,
+          "provision" => 0,
+        )
+      );
+
+      $this->Error('send kkt');
+      $this->Error(print_r($data_kkt, 1));
+      $request2 = self::cur_json_encode($data_kkt);
+      $str = date("d-m-Y H:i:s") . $data_kkt['Type'] . $data_kkt['InvoiceId'] . $data_kkt['AccountId'] . $data_kkt['CustomerReceipt']['email'];
+      $reque = md5($str);
+      $ch = curl_init('https://api.cloudpayments.ru/kkt/receipt');
+      curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+      curl_setopt($ch, CURLOPT_USERPWD, trim($KKT_PARAMS['APIPASS']) . ":" . trim($KKT_PARAMS['APIKEY']));
+      curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+      curl_setopt($ch, CURLOPT_HTTPHEADER, array("Content-Type: application/json", "X-Request-ID:" . $reque));
+      curl_setopt($ch, CURLOPT_POST, true);
+      curl_setopt($ch, CURLOPT_POSTFIELDS, $request2);
+      $content = curl_exec($ch);
+      $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+      $curlError = curl_error($ch);
+      curl_close($ch);
+
+      $out1 = $this->Object_to_array(json_decode($content));
+
+    }
+
     private function processconfirmAction(Payment $payment, Request $request)
-    {     
-        $result = new PaySystem\ServiceResult();
-        $data = $this->extractDataFromRequest($request);
-        $data1=$data['DATA'];
-        $data1=$this->Object_to_array(json_decode(mb_convert_encoding($data1, 'utf-8', mb_detect_encoding($data1))));
-        
+    {
+      $result = new PaySystem\ServiceResult();
+      $data = $this->extractDataFromRequest($request);
+      $data1 = $data['DATA'];
+      $data1 = $this->Object_to_array(json_decode(mb_convert_encoding($data1, 'utf-8', mb_detect_encoding($data1))));
 
-        $order=\Bitrix\Sale\Order::load($data['INVOICE_ID']);
-        $paymentCollection = $order->getPaymentCollection();
-        
-        
+      $order = \Bitrix\Sale\Order::load($data['INVOICE_ID']);
+      $paymentCollection = $order->getPaymentCollection();
 
-        $check_sum=false;
+      $check_sum = false;
       //  $l = $paymentCollection[0];;
-        foreach ($paymentCollection as $payment):
-            if (roundEx($payment->getSum(), 2)==roundEx($request->get('Amount'), 2))
-            {
-                  $l=$payment;
-                  $check_sum=true;
-            }
-        endforeach;
+      foreach ($paymentCollection as $payment):
+        if (roundEx($payment->getSum(), 2) == roundEx($request->get('Amount'), 2)) {
+          $l = $payment;
+          $check_sum = true;
+        }
+      endforeach;
 
-        if ($check_sum):
-              $dat=new \Bitrix\Main\Type\DateTime();
-              $STATUS_PAY=$this->getBusinessValue($payment, 'STATUS_PAY');
-              $STATUS_PARTIAL_PAY=$this->getBusinessValue($payment, 'STATUS_PARTIAL_PAY');
-              if (empty($STATUS_PAY)) $STATUS_PAY='P';
-              
-              $l->setField('PAID','Y');
-             // $order->setField('STATUS_ID',$STATUS_PAY);   
-              
-              $l->setField('DATE_PAID',$dat);
-              $l->setField('PAY_VOUCHER_NUM',$request->get('TransactionId'));
-              $l->setField('PAY_VOUCHER_DATE',$dat);
-              $l->setField('COMMENTS','Y');
-              $order->save();
-              /** Заново получаем данные по оплате и заказам, т.к. одна из оплат прошла **/
-              $order=\Bitrix\Sale\Order::load($data['INVOICE_ID']);
-              $paymentCollection = $order->getPaymentCollection();
-              
-              if ($this->isFullPricePaid($order,$paymentCollection, $request)):
-                    $order->setField('STATUS_ID',$STATUS_PAY); 
-              else:
-                    $order->setField('STATUS_ID',$STATUS_PARTIAL_PAY);      
-              endif;
-              
-
-              $order->save();
-              $data['CODE'] = 0;
-              $result->setData($data);
+      if ($check_sum):
+        $dat = new \Bitrix\Main\Type\DateTime();
+        if ($this->getBusinessValue($payment, 'NEW_STATUS') == "Y"):
+          $STATUS_PAY = $this->getBusinessValue($payment, 'STATUS_PAY2');
         else:
-              $data['CODE'] = 11;
-              $result->setData($data);
+          $STATUS_PAY = $this->getBusinessValue($payment, 'STATUS_PAY');
         endif;
-        return $result;
-    
-    }
-    
-    
-    private function processSuccessAction(Payment $payment, Request $request)
-    {
-        $result = new PaySystem\ServiceResult();
-        $data = $this->extractDataFromRequest($request);  
-        $data1=$data['DATA'];
-        $data1=$this->Object_to_array(json_decode(mb_convert_encoding($data1, 'utf-8', mb_detect_encoding($data1))));
-       
-        self::Error('processSuccessAction - data');
-        self::Error(print_r($data1,1));
-        
-        $order=\Bitrix\Sale\Order::load($data['INVOICE_ID']);
+        $STATUS_PARTIAL_PAY = $this->getBusinessValue($payment, 'STATUS_PARTIAL_PAY');
+        if (empty($STATUS_PAY))
+          $STATUS_PAY = 'P';
+
+        $l->setField('PAID', 'Y');
+        // $order->setField('STATUS_ID',$STATUS_PAY);
+
+        $l->setField('DATE_PAID', $dat);
+        $l->setField('PAY_VOUCHER_NUM', $request->get('TransactionId'));
+        $l->setField('PAY_VOUCHER_DATE', $dat);
+        $l->setField('COMMENTS', 'Y');
+        $order->save();
+        /** Заново получаем данные по оплате и заказам, т.к. одна из оплат прошла **/
+        $order = \Bitrix\Sale\Order::load($data['INVOICE_ID']);
         $paymentCollection = $order->getPaymentCollection();
 
-        /** Если уже была хоть одна оплата - отправляем чек - возврата **/ 
-        $IS_PAID=false;
-        foreach ($paymentCollection as $payment_):
-            if ($payment_->isPaid()):
-                $IS_PAID=true;
-            endif;
-        endforeach;
-
-        self::Error('IS_PAID');
-        self::Error(print_r($IS_PAID,1));
-        
-        $CHECKONLINE=$this->getBusinessValue($payment, 'CHECKONLINE');
-        
-        if ($IS_PAID && $CHECKONLINE!='N'):
-              self::send_kkt("IncomeReturn",$order,$payment);
-        endif;
-
-        $TYPE_SYSTEM=$this->getBusinessValue($payment, 'TYPE_SYSTEM');    //двухстадийка - 1 одностадийка - 0
-        $STATUS_AU=$this->getBusinessValue($payment, 'STATUS_AU');    //двухстадийка - 1 одностадийка - 0
-
-        $STATUS_PAY=$this->getBusinessValue($payment, 'STATUS_PAY');
-        $STATUS_PARTIAL_PAY=$this->getBusinessValue($payment, 'STATUS_PARTIAL_PAY');
-        if (empty($STATUS_PAY)) $STATUS_PAY='P';
-        $check_sum=false;
-      //
-      
-        self::Error('request->getAmount');
-        self::Error(print_r($request->get('Amount'),1));
-      
-      //  $l = $paymentCollection[0];
-        foreach ($paymentCollection as $payment):
-           // if ($payment->getField("ID")==$data1['PAY_SYSTEM_ID'] && roundEx($payment->getSum(), 2)==roundEx($request->get('Amount'), 2))
-           if (roundEx($payment->getSum(), 2)==roundEx($request->get('Amount'), 2))
-           {
-                  $l=$payment;
-                  $check_sum=true;
-           } 
-        endforeach;
-        
-        self::Error('check_sum');
-        self::Error(print_r($check_sum,1));
-        
-        
-        if ($check_sum):
-              $dat=new \Bitrix\Main\Type\DateTime();
-              if (!$TYPE_SYSTEM)  
-              {
-                    $l->setField('PAID','Y');                         
-                    $l->setField('DATE_PAID',$dat);
-                    $l->setField('PAY_VOUCHER_NUM',$request->get('TransactionId'));
-                    $l->setField('PAY_VOUCHER_DATE',$dat);
-                    $l->setField('COMMENTS','Y');   
-                    $order->save();
-                    /** Заново получаем данные по оплате и заказам, т.к. одна из оплат прошла **/
-                    $order=\Bitrix\Sale\Order::load($data['INVOICE_ID']);
-                    $paymentCollection = $order->getPaymentCollection();
-                    
-                    if ($this->isFullPricePaid($order,$paymentCollection, $request)):
-                          $order->setField('STATUS_ID',$STATUS_PAY); 
-                    else:
-                          $order->setField('STATUS_ID',$STATUS_PARTIAL_PAY);      
-                    endif;
-              }
-              else                                       
-              {
-                    $order->setField('STATUS_ID',$STATUS_AU);      //статус авторизован для двухстадийки
-                    $l->setField('DATE_PAID',$dat);
-                    $l->setField('PAY_VOUCHER_NUM',$request->get('TransactionId'));
-                    $l->setField('PAY_VOUCHER_DATE',$dat);
-                    $l->setField('COMMENTS','Y');
-                    $order->save();
-              }
-              $order->save();
-              $data['CODE'] = 0;
-              $result->setData($data);
+        if ($this->isFullPricePaid($order, $paymentCollection, $request)):
+          $order->setField('STATUS_ID', $STATUS_PAY);
         else:
-              $data['CODE'] = 11;   
-              $result->setData($data);
+          $order->setField('STATUS_ID', $STATUS_PARTIAL_PAY);
         endif;
-        return $result;
-    }
-    
-    private function processRefundAction(Payment $payment, Request $request)
-    {
-        $result = new PaySystem\ServiceResult();
-        $data = $this->extractDataFromRequest($request);
-        $order=\Bitrix\Sale\Order::load($data['INVOICE_ID']);
-        $paymentCollection = $order->getPaymentCollection();
-        
-        $l = $paymentCollection[0];
-        foreach ($paymentCollection as $payment_):
-            if ($payment_->getField("PAY_VOUCHER_NUM")==$request->get('PaymentTransactionId')) $l=$payment_;
-        endforeach;    
 
-
-
-        
-        
-        $l->setPaid("N");
-        $TYPE_SYSTEM=$this->getBusinessValue($payment, 'TYPE_SYSTEM');    //двухстадийка - 1 одностадийка - 0
-        $STATUS_CHANCEL=$this->getBusinessValue($payment, 'STATUS_CHANCEL');
-        
-      //  $l = $paymentCollection[0];
-        $dat=new \Bitrix\Main\Type\DateTime();
-        $l->setField('PAID','N');
-        $order->setField('STATUS_ID',$STATUS_CHANCEL);
-        
         $order->save();
         $data['CODE'] = 0;
         $result->setData($data);
-        
-        return $result;
+      else:
+        $data['CODE'] = 11;
+        $result->setData($data);
+      endif;
+      return $result;
+
     }
 
-	/**
-	 * @param Request $request
-	 * @return array
-	 */
-	private function extractDataFromRequest(Request $request)
-	{
-		return array(
-			'HEAD' => $request->get('action').'Response',
-			'INVOICE_ID' =>  $request->get('InvoiceId'),
-      'DATA' =>  $request->get('Data')
-		);
-	}
+    private function processSuccessAction(Payment $payment, Request $request)
+    {
+      $result = new PaySystem\ServiceResult();
+      $data = $this->extractDataFromRequest($request);
+      $data1 = $data['DATA'];
+      $data1 = $this->Object_to_array(json_decode(mb_convert_encoding($data1, 'utf-8', mb_detect_encoding($data1))));
 
-	/**
-	 * @param Payment $payment
-	 * @param Request $request
-	 * @return PaySystem\ServiceResult
-	 */
-	private function processCancelAction(Payment $payment, Request $request)
-	{
-		$result = new PaySystem\ServiceResult();
-		$data = $this->extractDataFromRequest($request);
+      $order = \Bitrix\Sale\Order::load($data['INVOICE_ID']);
+      $paymentCollection = $order->getPaymentCollection();
+      self::Error('---processSuccessAction---');
+      self::Error('---INVOICE_ID---');
+      self::Error($data['INVOICE_ID']);
 
+      self::Error('---TransactionId---');
+      self::Error($request->get('TransactionId'));
+      /** Если уже была хоть одна оплата - отправляем чек - возврата **/
+      $IS_PAID = false;
+      foreach ($paymentCollection as $payment_):
+        self::Error($payment_->isPaid());
+        if ($payment_->isPaid() && $request->get('TransactionId') != $payment_->getField("PAY_VOUCHER_NUM")):
+          self::Error($request->get('TransactionId') . "!=" . $payment_->getField("PAY_VOUCHER_NUM"));
+          $IS_PAID = true;
+        endif;
+      endforeach;
+      //  $payment_->getField("PAY_VOUCHER_NUM") == $request->get('PaymentTransactionId')
+      self::Error("--IS_PAID--");
+      self::Error($IS_PAID);
+      if ($IS_PAID):
+        self::Error("--IncomeReturn--");
+        self::send_kkt("IncomeReturn", $order, $payment);
+      endif;
 
-			$data['CODE'] = 0;
-			$result->setOperationType(PaySystem\ServiceResult::MONEY_LEAVING);
+      $TYPE_SYSTEM = $this->getBusinessValue($payment, 'TYPE_SYSTEM');    //двухстадийка - 1 одностадийка - 0
 
+      if ($this->getBusinessValue($payment, 'NEW_STATUS') == "Y"):
+        $STATUS_AU = $this->getBusinessValue($payment, 'STATUS_AU2');    //двухстадийка - 1 одностадийка - 0
+        $STATUS_PAY = $this->getBusinessValue($payment, 'STATUS_PAY2');
+      else:
+        $STATUS_AU = $this->getBusinessValue($payment, 'STATUS_AU');    //двухстадийка - 1 одностадийка - 0
+        $STATUS_PAY = $this->getBusinessValue($payment, 'STATUS_PAY');
+      endif;
 
-		$result->setData($data);
+      $STATUS_PARTIAL_PAY = $this->getBusinessValue($payment, 'STATUS_PARTIAL_PAY');
+      if (empty($STATUS_PAY))
+        $STATUS_PAY = 'P';
+      $check_sum = false;
 
-		return $result;
-	}
+      foreach ($paymentCollection as $payment):
+        if (roundEx($payment->getSum(), 2) == roundEx($request->get('Amount'), 2)):
+          $l = $payment;
+          $check_sum = true;
+        endif;
+      endforeach;
 
-	/**
-	 * @return mixed
-	 */
-	protected function getUrlList()
-	{
-		return array(
-			'confirm' => array(
-				self::ACTIVE_URL => 'https://api.cloudpayments.ru/payments/confirm ',
-			),
-			'cancel' => array(
-				self::ACTIVE_URL => 'https://api.cloudpayments.ru/payments/void',
+      if (!$check_sum):
+        self::Error("--Incorect sum--");
+        $data['CODE'] = 11;
+        $result->setData($data);
+        return $result;
+      endif;
 
-			),
-			'return' => array(
-				self::ACTIVE_URL => 'https://api.cloudpayments.ru/payments/refund',
-			),
-            'get'=>array(
-                self::ACTIVE_URL =>' https://api.cloudpayments.ru/payments/find',
-            )
-		);
-	}
+      if ($check_sum):
+        $dat = new \Bitrix\Main\Type\DateTime();
+        if (!$TYPE_SYSTEM) {
+          $l->setField('PAID', 'Y');
+          $l->setField('DATE_PAID', $dat);
+          $l->setField('PAY_VOUCHER_NUM', $request->get('TransactionId'));
+          $l->setField('PAY_VOUCHER_DATE', $dat);
+          $l->setField('COMMENTS', 'Y');
+          $order->save();
+          /** Заново получаем данные по оплате и заказам, т.к. одна из оплат прошла **/
+          $order = \Bitrix\Sale\Order::load($data['INVOICE_ID']);
+          $paymentCollection = $order->getPaymentCollection();
 
-	/**
-	 * @param Payment $payment
-	 * @param Request $request
-	 * @return PaySystem\ServiceResult
-	 */
-	public function processRequest(Payment $payment, Request $request)
-	{
-	$result = new PaySystem\ServiceResult();
-
-	    $action= $request->get("action");
-        if ($action == 'check')
-        {
-            return $this->processCheckAction($payment, $request);
+          if ($this->isFullPricePaid($order, $paymentCollection, $request)):
+            $order->setField('STATUS_ID', $STATUS_PAY);
+          else:
+            $order->setField('STATUS_ID', $STATUS_PARTIAL_PAY);
+          endif;
+        } else {
+          $order->setField('STATUS_ID', $STATUS_AU);      //статус авторизован для двухстадийки
+          $l->setField('DATE_PAID', $dat);
+          $l->setField('PAY_VOUCHER_NUM', $request->get('TransactionId'));
+          $l->setField('PAY_VOUCHER_DATE', $dat);
+          $l->setField('COMMENTS', 'Y');
+          $order->save();
         }
-        else if ($action == 'fail')
-        {
-            return $this->processFailAction($payment, $request);
-        }
-        else if ($action == 'pay')
-        {
-            return $this->processSuccessAction($payment, $request);
-        }
-        else if ($action == 'refund')
-        {
-            return $this->processrefundAction($payment, $request);
-        }
-        else if ($action == 'confirm')
-        {
-            return $this->processconfirmAction($payment, $request);
-        }
-        else{
+        $order->save();
+        $data['CODE'] = 0;
+        $result->setData($data);
+      else:
+        $data['CODE'] = 11;
+        $result->setData($data);
+      endif;
 
-            $data = $this->extractDataFromRequest($request);
-            $data['TECH_MESSAGE'] = 'Unknown action: '.$action;
-            $result->setData($data);
-            $result->addError(new Error('Unknown action: '.$action.'. Request='.join(', ', $request->toArray())));
-        }
+      return $result;
+    }
 
-		return $result;
-	}
+    private function processRefundAction(Payment $payment, Request $request)
+    {
+      $result = new PaySystem\ServiceResult();
+      $data = $this->extractDataFromRequest($request);
+      $order = \Bitrix\Sale\Order::load($data['INVOICE_ID']);
+      $paymentCollection = $order->getPaymentCollection();
 
-	/**
-	 * @param Payment $payment
-	 * @return bool
-	 */
-	protected function isTestMode(Payment $payment = null)
-	{
-		return ($this->getBusinessValue($payment, 'PS_IS_TEST') == 'Y');
-	}
+      $l = $paymentCollection[0];
+      foreach ($paymentCollection as $payment_):
+        if ($payment_->getField("PAY_VOUCHER_NUM") == $request->get('PaymentTransactionId'))
+          $l = $payment_;
+      endforeach;
 
+      $l->setPaid("N");
+      $TYPE_SYSTEM = $this->getBusinessValue($payment, 'TYPE_SYSTEM');    //двухстадийка - 1 одностадийка - 0
+      if ($this->getBusinessValue($payment, 'NEW_STATUS') == "Y"):
+        $STATUS_CHANCEL = $this->getBusinessValue($payment, 'STATUS_CHANCEL2');
+      else:
+        $STATUS_CHANCEL = $this->getBusinessValue($payment, 'STATUS_CHANCEL');
+      endif;
 
-	/**
-	 * @param Payment $payment
-	 * @return PaySystem\ServiceResult
-	 */
-	public function cancel(Payment $payment)
-	{
-		$result = new PaySystem\ServiceResult();
+      //  $l = $paymentCollection[0];
+      $dat = new \Bitrix\Main\Type\DateTime();
+      $l->setField('PAID', 'N');
+      $order->setField('STATUS_ID', $STATUS_CHANCEL);
 
-		return $result;
-	}
+      $order->save();
+      $data['CODE'] = 0;
+      $result->setData($data);
 
-	/**
-	 * @return array
-	 */
-	public function getCurrencyList()
-	{
-		return array('RUB');
-	}
+      return $result;
+    }
 
+    /**
+     * @param Request $request
+     * @return array
+     */
+    private function extractDataFromRequest(Request $request)
+    {
+      return array(
+        'HEAD' => $request->get('action') . 'Response',
+        'INVOICE_ID' => $request->get('InvoiceId'),
+        'DATA' => $request->get('Data')
+      );
+    }
 
+    /**
+     * @param Payment $payment
+     * @param Request $request
+     * @return PaySystem\ServiceResult
+     */
+    private function processCancelAction(Payment $payment, Request $request)
+    {
+      $result = new PaySystem\ServiceResult();
+      $data = $this->extractDataFromRequest($request);
 
+      $data['CODE'] = 0;
+      $result->setOperationType(PaySystem\ServiceResult::MONEY_LEAVING);
 
-	/**
-	 * @return bool
-	 */
-	public function isTuned()
-	{
-		$personTypeList = PaySystem\Manager::getPersonTypeIdList($this->service->getField('ID'));
-		$personTypeId = array_shift($personTypeList);
-		$shopId = BusinessValue::get('YANDEX_SHOP_ID', $this->service->getConsumerName(), $personTypeId);
+      $result->setData($data);
 
-		return !empty($shopId);
-	}
+      return $result;
+    }
 
-}
+    /**
+     * @return mixed
+     */
+    protected function getUrlList()
+    {
+      return array(
+        'confirm' => array(
+          self::ACTIVE_URL => 'https://api.cloudpayments.ru/payments/confirm ',
+        ),
+        'cancel' => array(
+          self::ACTIVE_URL => 'https://api.cloudpayments.ru/payments/void',
+
+        ),
+        'return' => array(
+          self::ACTIVE_URL => 'https://api.cloudpayments.ru/payments/refund',
+        ),
+        'get' => array(
+          self::ACTIVE_URL => ' https://api.cloudpayments.ru/payments/find',
+        )
+      );
+    }
+
+    /**
+     * @param Payment $payment
+     * @param Request $request
+     * @return PaySystem\ServiceResult
+     */
+    public function processRequest(Payment $payment, Request $request)
+    {
+      $result = new PaySystem\ServiceResult();
+
+      $action = $request->get("action");
+      if ($action == 'check') {
+        return $this->processCheckAction($payment, $request);
+      } elseif ($action == 'fail') {
+        return $this->processFailAction($payment, $request);
+      } elseif ($action == 'pay') {
+        return $this->processSuccessAction($payment, $request);
+      } elseif ($action == 'refund') {
+        return $this->processrefundAction($payment, $request);
+      } elseif ($action == 'confirm') {
+        return $this->processconfirmAction($payment, $request);
+      } else {
+
+        $data = $this->extractDataFromRequest($request);
+        $data['TECH_MESSAGE'] = 'Unknown action: ' . $action;
+        $result->setData($data);
+        $result->addError(new Error('Unknown action: ' . $action . '. Request=' . join(', ', $request->toArray())));
+      }
+
+      return $result;
+    }
+
+    /**
+     * @param Payment $payment
+     * @return bool
+     */
+    protected function isTestMode(Payment $payment = NULL)
+    {
+      return ($this->getBusinessValue($payment, 'PS_IS_TEST') == 'Y');
+    }
+
+    public function get_course($PRICE, $CURRENCY, $COURSE_RATE)
+    {
+      return $PRICE;
+      /*      if ($PRICE && $CURRENCY):
+              $tmp = explode("-", $COURSE_RATE);
+              if ($tmp[1]):
+                CModule::IncludeModule('currency');
+                $course = CCurrencyRates::ConvertCurrency($PRICE, $CURRENCY, "RUB");
+                if ($COURSE_RATE > 0)
+                  $course = $course - ($course * $COURSE_RATE);
+                // return number_format($course, 2, '.', '');
+                return intval(($course*100))/100;
+              else:
+                CModule::IncludeModule('currency');
+                $course = CCurrencyRates::ConvertCurrency($PRICE, $CURRENCY, "RUB");
+
+                if ($COURSE_RATE > 0)
+                  $course = $course + ($course * $COURSE_RATE);
+                //  return number_format($course, 2, '.', '');
+                return intval(($course*100))/100;
+              endif;
+
+            endif;*/
+    }
+
+    /**
+     * @param Payment $payment
+     * @return PaySystem\ServiceResult
+     */
+    public function cancel(Payment $payment)
+    {
+      $result = new PaySystem\ServiceResult();
+
+      return $result;
+    }
+
+    /**
+     * @return array
+     */
+    public function getCurrencyList()
+    {
+      return array('RUB');
+    }
+
+    /**
+     * @return bool
+     */
+    public function isTuned()
+    {
+      $personTypeList = PaySystem\Manager::getPersonTypeIdList($this->service->getField('ID'));
+      $personTypeId = array_shift($personTypeList);
+      $shopId = BusinessValue::get('YANDEX_SHOP_ID', $this->service->getConsumerName(), $personTypeId);
+
+      return !empty($shopId);
+    }
+
+  }
