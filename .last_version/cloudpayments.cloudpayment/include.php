@@ -15,13 +15,13 @@
           $order = \Bitrix\Sale\Order::load($_REQUEST['ID']);
           $propertyCollection = $order->getPropertyCollection();
 
-          $two_stage_payment = true; ///������������� ������
+          $two_stage_payment = true; ///двухстадийная оплата
 
           $TYPE = $order->isPaid() ? 'Y' : "N";
 
           $paymentCollection = $order->getPaymentCollection();
           foreach ($paymentCollection as $payment) {
-            $psName = $payment->getPaymentSystemName(); // �������� ��������� �������
+            $psName = $payment->getPaymentSystemName(); // название платежной системы
             $psId = $payment->getPaymentSystemId();
             $ps = $payment->getPaySystem();
           }
@@ -130,7 +130,7 @@
         $propertyCollection = $order->getPropertyCollection();
         $paymentCollection = $order->getPaymentCollection();
         foreach ($paymentCollection as $payment) {
-          $psName = $payment->getPaymentSystemName(); // �������� ��������� �������
+          $psName = $payment->getPaymentSystemName(); // название платежной системы
           $psId = $payment->getPaymentSystemId();
         }
 
@@ -338,7 +338,7 @@
             $VOID_STATUS = $CLOUD_PARAMS['STATUS_VOID']['VALUE'];
           else $VOID_STATUS = "AR";
 
-          //�������
+          //возврат
           foreach ($paymentCollection as $payment) {
             if ($payment->getPaySystem()->getField("ACTION_FILE") == 'cloudpayment') {
 
@@ -378,10 +378,10 @@
             $VOID_STATUS = $CLOUD_PARAMS['STATUS_VOID']['VALUE'];
           else $VOID_STATUS = "AR";
 
-          switch ($STATUS_ID)     ///�������� �� �������� �� ������
+          switch ($STATUS_ID)     ///поменять на значение из модуля
           {
             case $REFUND_STATUS:
-              //�������
+              //возврат
               foreach ($paymentCollection as $payment) {
                 if ($payment->getPaySystem()->getField("ACTION_FILE") == 'cloudpayment') {
 
@@ -399,7 +399,7 @@
               break;
 
             case $VOID_STATUS:
-              //�������
+              //возврат
               foreach ($paymentCollection as $payment) {
                 if ($payment->getPaySystem()->getField("ACTION_FILE") == 'cloudpayment') {
 
@@ -493,7 +493,6 @@
 
                       }
 
-                        //��������� ��������
                       if ($order->getDeliveryPrice() > 0 && $order->getField("DELIVERY_ID")) {
                         if ($CLOUD_PARAMS['VAT_DELIVERY' . $order->getField("DELIVERY_ID")]['VALUE'])
                           $Delivery_vat = $CLOUD_PARAMS['VAT_DELIVERY' . $order->getField("DELIVERY_ID")]['VALUE'];
